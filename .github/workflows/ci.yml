@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'lane/ops']
+  pull_request:
+    branches: [main, 'lane/ops']
+
+concurrency:
+  group: ci-ops-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-lint:
+    name: ops (docker + compose lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+      - name: Lint Dockerfile.backend
+        run: |
+          curl -sSL https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 \
+            -o /usr/local/bin/hadolint
+          chmod +x /usr/local/bin/hadolint
+          hadolint --ignore DS009 --ignore DS011 docker/Dockerfile.backend
+      - name: Lint Dockerfile.frontend
+        run: |
+          hadolint --ignore DS009 --ignore DS011 docker/Dockerfile.frontend
+      - name: Compose directive #5 check (redis is ephemeral)
+        run: |
+          set -euo pipefail
+          grep -F -- '--appendonly' docker-compose.yml
+          grep -F -- '"no"'  docker-compose.yml
+          grep -F -- '"save"' docker-compose.yml
+          grep -F -- '""'    docker-compose.yml
