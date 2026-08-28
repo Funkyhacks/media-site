@@ -1,0 +1,26 @@
+# SecWeb — multi-stage image for the React (Vite + TypeScript) frontend (SPEC.md §3).
+# Builds a static bundle in a node stage and serves it with a tiny static server
+# in a minimal runtime stage.
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+# install deps first (cacheable)
+COPY package.json ./
+RUN npm install --no-audit --no-fund
+
+# build
+COPY . .
+RUN npm run build
+
+# --- runtime: minimal static server ---
+FROM node:22-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+
+# serve the built assets with a 0-dep static handler
+COPY --from=build /app/dist ./dist
+COPY docker/static-server.mjs ./server.mjs
+
+EXPOSE 4173
+CMD ["node", "server.mjs"]
