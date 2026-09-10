@@ -38,5 +38,5 @@ jobs:
           set -euo pipefail
           grep -F -- '--appendonly' docker-compose.yml
           grep -F -- '"no"'  docker-compose.yml
-          grep -F -- '"save"' docker-compose.yml
+          grep -F -- '--save' docker-compose.yml
           grep -F -- '""'    docker-compose.yml
