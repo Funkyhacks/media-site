@@ -7,11 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Minimal toolchain only (no build tools needed for our pure-Python deps +
-# wheels; kept in case a dep ever needs to compile).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+# No apt packages are needed: the healthcheck uses the stdlib urllib.request
+# (python -c ...) and every pip dep is a pure-Python wheel, so there is no build
+# toolchain to install. (Previously curl was apt-get installed but is unused —
+# removing it also clears the hadolint DL3008 "pin versions" finding.)
 
 WORKDIR /app
 
