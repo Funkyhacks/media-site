@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Funkyhacks <funkyhacks@users.noreply.github.com>
 Date: Thu, 21 Aug 2026 00:00:00 +0000
 Subject: [PATCH 1/2] core/storage: cap Pillow decompression (anti-bomb DoS)
@@ -12,14 +12,9 @@ the existing except) instead of allocating gigabytes.
 Refs: docs/SECURITY.md finding 1, THREAT-MODEL.md T11.
 
 ---
- app/core/storage.py | 9 ++++++++-
- 1 file changed, 8 insertions(+), 1 deletion(-)
-
-diff --git a/app/core/storage.py b/app/core/storage.py
 --- a/app/core/storage.py
 +++ b/app/core/storage.py
-@@
-     """Generate a JPEG thumbnail in-memory (Pillow). Returns None for
+@@ -119,6 +119,14 @@
      non-image inputs (video files, unknown types)."""
      try:
          from PIL import Image  # local import keeps Pillow optional at module load
@@ -34,4 +29,3 @@ diff --git a/app/core/storage.py b/app/core/storage.py
      except Exception:
          return None
      try:
-         img = Image.open(io.BytesIO(image_bytes))

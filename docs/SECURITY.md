@@ -93,7 +93,10 @@ content, `aad=b"meta"` for the meta key) prevents ciphertext swapping.
 ## Findings (non-blocking, recommended)
 
 These are **not** directive violations. They are hardening gaps worth closing
-before production. Patches for the two code-level ones are in `patches/`.
+before production. Patches for the code-level ones are in `patches/`:
+0001/0002 are the Pillow-bomb / upload-size DoS caps; 0003–0006 are four further
+gaps found in an independent re-review (base64 key decode, key-material repr
+leak, JWT-secret enforcement, Content-Disposition).
 
 1. **[HIGH] Pillow decompression-bomb (DoS).** `app/core/storage.py::make_thumbnail`
    calls `Image.open()` + `img.thumbnail()` on user-supplied bytes with **no
@@ -119,6 +122,53 @@ before production. Patches for the two code-level ones are in `patches/`.
    (ephemeral) cache if the operator wants server-side revocation.
 6. **[INFO] Error messages are constant.** All key-rejection paths return the
    same `"security keys rejected"` detail — no oracle. Good.
+
+### Findings 7–10 (independent re-review, 2026-08-29)
+
+These were **not** in the initial review. Each was confirmed against the code
+and (where claimed) proven with a PoC before being written up.
+
+7. **[MED] Non-strict base64 security-key decoding → key-space ambiguity.**
+   `app/api/deps.py::_b64decode_header` and `app/api/auth_routes.py::_b64` call
+   `base64.b64decode(value, validate=False)`, which *silently drops* non-alphabet
+   bytes and accepts partial data. Consequence (PoC-verified): a client that
+   intends key `key1` sends it base64, but a client that sends `key1!!` gets
+   decoded to a *different* 3-byte key material, and a non-base64 body silently
+   falls back to the raw UTF-8 bytes — so two different client inputs can map to
+   two different server-side key materials than the client intended. The wire
+   protocol is base64 (the frontend b64()-encodes), so the decode should be
+   **strict** (`validate=True`) and a non-base64 value a 400 client error, not a
+   guess. → `patches/0003-strict-base64-keys.patch` (applies clean; 79 tests still
+   pass — no test relies on the raw-fallback, the "bad keys" `AAAA`/`BBBB` are
+   valid base64).
+8. **[MED] `SecretBytes` inherits `bytearray.__repr__` → key bytes leak to logs.**
+   `app/core/crypto.py::SecretBytes` subclasses `bytearray` with no `__repr__` /
+   `__str__` override, so `repr(k)` / `f"{k}"` print **every byte of the live key
+   material** (PoC-verified: `SecretBytes(b'\x00\x01...\x1f')`). If the object is
+   ever included in a log line, f-string, or traceback, the key is written to the
+   log even though `key_scope()` zeroizes the buffer afterward — the log copy
+   persists. Fix: override `__repr__`/`__str__` to a redacted form. →
+   `patches/0004-secretbytes-mask-repr.patch`.
+9. **[MED] `SECWEB_JWT_SECRET` defaults to a weak 29-byte value; no enforcement.**
+   `app/config.py::_DEFAULTS` ships `"dev-insecure-secret-change-me"` (29 bytes)
+   and `get_settings()` never validates it. PyJWT 2.13 already emits
+   `InsecureKeyLengthWarning` (observed in the test run) because RFC 7518 §3.2
+   recommends ≥32 bytes for HS256. `docker-compose` requires the env var, but
+   running `uvicorn app.main:app` directly with the env unset silently falls back
+   to the **known** default, letting anyone who reads the source forge all users'
+   identity tokens. Fix: flag the default + short secrets at startup (loud warning).
+   → `patches/0005-jwt-secret-enforcement.patch`.
+10. **[LOW] `Content-Disposition` built from an unescaped, attacker-controlled
+    filename → header breakout / proxy-smuggling surface.**
+    `app/api/file_routes.py::file_content` sets
+    `Content-Disposition: inline; filename="<name>"` where `name` is the decrypted
+    original name (attacker-set at upload). A filename like
+    `x"; Set-Cookie: evil=1; filename="y` breaks out of the quoted value. Starlette/
+    h11 reject raw CRLF so it is **not** full header injection, but it is a
+    malformed-header / proxy-smuggling surface. Fix: emit a safe ASCII fallback plus
+    a UTF-8 `filename*` per RFC 6266 §4. →
+    `patches/0006-content-disposition-sanitize.patch` (PoC-verified the malicious
+    name is neutralised; 79 tests still pass).
 
 ## Recommended response headers (frontend/nginx edge)
 

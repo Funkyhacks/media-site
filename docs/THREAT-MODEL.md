@@ -155,6 +155,51 @@
 - **Residual:** recommend the CSP + `X-Content-Type-Options: nosniff` headers
   at the edge (not yet enforced server-side).
 
+### T16 — Key-material ambiguity via lenient base64 decode
+- **Actor:** confused client, or an attacker probing the key protocol.
+- **Likelihood:** Low-Medium (protocol ambiguity; no exploit without a valid JWT).
+- **Impact:** Medium (a client can silently end up with a *different* key
+  material than intended, breaking the "same keys in, same data out" contract
+  and creating a subtle mismatch/oracle surface).
+- **Mitigation (recommended):** strict `base64.b64decode(v, validate=True)`;
+  non-base64 → 400. `patches/0003`.
+- **Residual:** currently `validate=False` in `deps.py` + `auth_routes.py`
+  (SECURITY.md finding 7).
+
+### T17 — Live key material written to logs / tracebacks
+- **Actor:** any path that formats the key object (an error handler, a debug
+  log line, an exception traceback).
+- **Likelihood:** Low (no current site formats a `SecretBytes`, but it is one
+  `f"{ctx.master}"` away).
+- **Impact:** High (persistent key material in a log file defeats the
+  zero-knowledge guarantee for that request's key).
+- **Mitigation (recommended):** override `__repr__`/`__str__` on
+  `SecretBytes` to a redacted form. `patches/0004`.
+- **Residual:** currently inherits `bytearray.__repr__`, which prints all
+  bytes (SECURITY.md finding 8).
+
+### T18 — JWT secret weak/default → token forgery
+- **Actor:** anyone who reads the source (default) or a weak operator secret.
+- **Likelihood:** Low (requires source access or a misconfigured deployment).
+- **Impact:** High (forgery of *identity* tokens — though reading media still
+  requires the two security keys, a forged identity + captured keys is a full
+  compromise; also weakens the anti-replay/expiry assumptions).
+- **Mitigation (recommended):** reject/warn on the known default and on secrets
+  < 32 bytes at startup; require the env var in non-dev. `patches/0005`.
+- **Residual:** `get_settings()` falls back to the known dev default when the
+  env is unset (SECURITY.md finding 9).
+
+### T19 — Content-Disposition header breakout / proxy smuggling
+- **Actor:** a user (or attacker) who uploads a file whose decrypted original
+  name contains `"` or other header metacharacters.
+- **Likelihood:** Low.
+- **Impact:** Low-Medium (malformed `Content-Disposition`; proxy/CDN
+  header-smuggling surface; Starlette/h11 block raw CRLF so not full injection).
+- **Mitigation (recommended):** RFC 6266 `filename` + `filename*` with a safe
+  ASCII fallback. `patches/0006`.
+- **Residual:** currently `filename="<name>"` interpolated raw
+  (SECURITY.md finding 10).
+
 ---
 
 ## Attack-surface notes

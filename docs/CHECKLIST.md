@@ -54,6 +54,16 @@
 ## 10. Hardening gaps (see docs/SECURITY.md Findings)
 - [ ] Pillow decompression-bomb cap applied (`patches/0001`)
 - [ ] Upload size limit applied (`patches/0002`)
+- [ ] Strict base64 key decoding (`patches/0003`) — non-base64 → 400
+- [ ] `SecretBytes.__repr__`/`__str__` redacted (`patches/0004`) — no key bytes in logs
+- [ ] Weak/default JWT secret flagged at startup (`patches/0005`)
+- [ ] RFC 6266 `Content-Disposition` (`patches/0006`) — no header breakout
+- [ ] **All patches verify before ship:**
+  ```bash
+  for p in patches/000*.patch; do
+    ( cd <lane/backend> && git apply --check "$p" ) || echo "FAIL $p"
+  done
+  ```
 - [ ] (Recommended) explicit CORS allow-list if cross-origin
 - [ ] (Recommended) rate limiting on `/api/auth/*`
 - [ ] (Recommended) CSP + `X-Content-Type-Options: nosniff` at the edge

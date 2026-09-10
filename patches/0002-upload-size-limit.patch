@@ -1,4 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Funkyhacks <funkyhacks@users.noreply.github.com>
 Date: Thu, 21 Aug 2026 00:00:00 +0000
 Subject: [PATCH 2/2] api/file_routes: enforce a max upload size
@@ -17,18 +17,24 @@ client_max_body_size) for full defense.
 Refs: docs/SECURITY.md finding 2, THREAT-MODEL.md T10.
 
 ---
- app/api/file_routes.py | 12 ++++++++++++
- 1 file changed, 12 insertions(+)
-
-diff --git a/app/api/file_routes.py b/app/api/file_routes.py
 --- a/app/api/file_routes.py
 +++ b/app/api/file_routes.py
-@@
+@@ -38,6 +38,9 @@
+ 
  CHUNK = 256 * 1024  # 256 KiB stream chunks
-+
+ 
 +# Maximum upload size (anti DoS, THREAT-MODEL T10). Overridable for tests.
 +_MAX_UPLOAD = int(os.environ.get("SECWEB_MAX_UPLOAD_MB", "200")) * 1024 * 1024
-@@
++
+ 
+ def _content_type(filename: str, fallback: str = "application/octet-stream") -> str:
+     guessed, _ = mimetypes.guess_type(filename)
+
+--- a/app/api/file_routes.py
++++ b/app/api/file_routes.py
+@@ -104,9 +104,18 @@
+     repo: Repository = Depends(get_repo),
+     store: Store = Depends(get_store),
  ) -> dict:
 +    # Reject oversized uploads by *declared* size before reading into memory.
 +    declared = getattr(file, "size", None)
@@ -43,3 +49,5 @@ diff --git a/app/api/file_routes.py b/app/api/file_routes.py
 +    if len(data) > _MAX_UPLOAD:  # belt-and-braces after the read
 +        raise HTTPException(status_code=413, detail="file too large")
      name = os.path.basename(file.filename or "upload") or "upload"
+     ext = _ext_of(name)
+     content_type = _content_type(name, "application/octet-stream")
