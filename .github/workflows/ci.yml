@@ -17,6 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate docker-compose.yml
+        # The compose file correctly REQUIRES SECWEB_JWT_SECRET
+        # (${SECWEB_JWT_SECRET:?...}) in production. For validation we supply a
+        # dummy value so `docker compose config` can interpolate and prove the
+        # file is well-formed; the real secret is provided at deploy time.
+        env:
+          SECWEB_JWT_SECRET: ci-validation-only-not-a-real-secret
         run: docker compose config --quiet
       - name: Lint Dockerfile.backend
         run: |
