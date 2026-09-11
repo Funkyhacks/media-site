@@ -28,7 +28,7 @@ COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.
 COPY --from=deps /usr/local/bin /usr/local/bin
 
 COPY app/ ./app/
-RUN mkdir -p /app/storage \
+RUN mkdir -p /app/storage /app/db \
     && chown -R secweb:secweb /app
 USER secweb
 
