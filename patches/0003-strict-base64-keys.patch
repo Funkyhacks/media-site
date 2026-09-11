@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Funkyhacks <funkyhacks@users.noreply.github.com>
+Date: Thu, 21 Aug 2026 00:00:00 +0000
+Subject: [PATCH 3/6] api: strict base64 security-key decoding (no silent key-mangling)
+
+base64.b64decode(v, validate=False) in api/deps.py and api/auth_routes.py
+silently dropped non-alphabet bytes and accepted partial data, so two
+different client inputs could map to two different key materials than the
+client intended (key-space ambiguity). The wire protocol is base64 (the
+frontend b64()-encodes), so enforce it strictly and return 400 on
+non-base64 input instead of guessing.
+
+Refs: docs/SECURITY.md finding (base64 key decode), THREAT-MODEL.md T16.
+
+---
+--- a/app/api/deps.py
++++ b/app/api/deps.py
+@@ -57,13 +57,28 @@
+ 
+ 
+ def _b64decode_header(value: Optional[str]) -> Optional[bytes]:
+-    """Accept the security key as raw or base64 (header-safe)."""
++    """Decode the security-key header as *strict* base64.
++
++    The wire protocol is "the key is base64" (the frontend b64()-encodes it
++    before sending). A non-base64 header is a client error, not a silent
++    re-interpretation: with validate=False, ``key1!!`` decodes to one key
++    material while ``key1`` decodes to another, so two different client inputs
++    could silently map to two different key materials (key-space ambiguity).
++    Strict decode makes the server's notion of "the user's key" exactly the
++    base64 the client sent.
++    """
+     if value is None or value == "":
+         return None
+     try:
+-        return base64.b64decode(value, validate=False)
++        decoded = base64.b64decode(value, validate=True)
+     except Exception:
+-        return value.encode()
++        raise HTTPException(
++            status_code=400,
++            detail="X-Sec-Key-1 / X-Sec-Key-2 must be base64-encoded",
++        )
++    if len(decoded) < 1:
++        raise HTTPException(status_code=400, detail="security key is empty")
++    return decoded
+ 
+ 
+ @dataclass
+
+--- a/app/api/auth_routes.py
++++ b/app/api/auth_routes.py
+@@ -38,12 +38,21 @@
+ 
+ 
+ def _b64(v: str) -> bytes:
++    """Strict base64 decode.
++
++    The wire protocol is base64 (the frontend b64()-encodes key1/key2 before
++    sending). A non-base64 body is a client error (400), not a silent
++    re-interpretation — see ``_b64decode_header`` in ``api/deps.py``.
++    """
+     import base64
+ 
+     try:
+-        return base64.b64decode(v, validate=False)
++        decoded = base64.b64decode(v, validate=True)
+     except Exception:
+-        return v.encode()
++        raise HTTPException(status_code=400, detail="key1 / key2 must be base64-encoded")
++    if len(decoded) < 1:
++        raise HTTPException(status_code=400, detail="security key is empty")
++    return decoded
+ 
+ 
+ router = APIRouter(prefix="/api/auth", tags=["auth"])

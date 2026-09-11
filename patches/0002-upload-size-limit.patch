@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Funkyhacks <funkyhacks@users.noreply.github.com>
+Date: Thu, 21 Aug 2026 00:00:00 +0000
+Subject: [PATCH 2/2] api/file_routes: enforce a max upload size
+
+upload() called file.file.read() with no length cap, so a client could stream
+an arbitrarily large multipart body into process memory (availability DoS,
+THREAT-MODEL T10). Reject by the *declared* part size (fastapi UploadFile.size
+/ request Content-Length) BEFORE reading the body into memory, so an oversized
+upload is refused without being buffered.
+
+The ceiling is read from the SECWEB_MAX_UPLOAD_MB env (default 200 MB) so
+tests/ops can shrink it. Note: this bounds our memory; a truly hostile client
+can still waste bandwidth — pair with a reverse-proxy body limit (e.g. nginx
+client_max_body_size) for full defense.
+
+Refs: docs/SECURITY.md finding 2, THREAT-MODEL.md T10.
+
+---
+--- a/app/api/file_routes.py
++++ b/app/api/file_routes.py
+@@ -38,6 +38,9 @@
+ 
+ CHUNK = 256 * 1024  # 256 KiB stream chunks
+ 
++# Maximum upload size (anti DoS, THREAT-MODEL T10). Overridable for tests.
++_MAX_UPLOAD = int(os.environ.get("SECWEB_MAX_UPLOAD_MB", "200")) * 1024 * 1024
++
+ 
+ def _content_type(filename: str, fallback: str = "application/octet-stream") -> str:
+     guessed, _ = mimetypes.guess_type(filename)
+
+--- a/app/api/file_routes.py
++++ b/app/api/file_routes.py
+@@ -104,9 +104,18 @@
+     repo: Repository = Depends(get_repo),
+     store: Store = Depends(get_store),
+ ) -> dict:
++    # Reject oversized uploads by *declared* size before reading into memory.
++    declared = getattr(file, "size", None)
++    if declared is None:
++        cl = request.headers.get("content-length")
++        declared = int(cl) if cl and cl.isdigit() else None
++    if declared is not None and declared > _MAX_UPLOAD:
++        raise HTTPException(status_code=413, detail="file too large")
+     data = file.file.read()
+     if not data:
+         raise HTTPException(status_code=400, detail="empty file")
++    if len(data) > _MAX_UPLOAD:  # belt-and-braces after the read
++        raise HTTPException(status_code=413, detail="file too large")
+     name = os.path.basename(file.filename or "upload") or "upload"
+     ext = _ext_of(name)
+     content_type = _content_type(name, "application/octet-stream")

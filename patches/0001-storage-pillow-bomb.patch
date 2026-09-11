@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Funkyhacks <funkyhacks@users.noreply.github.com>
+Date: Thu, 21 Aug 2026 00:00:00 +0000
+Subject: [PATCH 1/2] core/storage: cap Pillow decompression (anti-bomb DoS)
+
+make_thumbnail() opened user-supplied image bytes with no pixel-count bound,
+so a crafted image (tiny on disk, enormous decompressed bitmap) could exhaust
+worker memory before thumbnail() ever ran. Enforce a conservative
+MAX_IMAGE_PIXELS cap and let Pillow raise DecompressionBombError (caught by
+the existing except) instead of allocating gigabytes.
+
+Refs: docs/SECURITY.md finding 1, THREAT-MODEL.md T11.
+
+---
+--- a/app/core/storage.py
++++ b/app/core/storage.py
+@@ -119,6 +119,14 @@
+     non-image inputs (video files, unknown types)."""
+     try:
+         from PIL import Image  # local import keeps Pillow optional at module load
++        # Anti decompression-bomb (THREAT-MODEL T11): bound the total pixel
++        # count a user-supplied image may expand to before we downscale it.
++        # Pillow raises DecompressionBombError past this limit, which the
++        # outer `except Exception` turns into a "no thumbnail" result.
++        try:
++            Image.MAX_IMAGE_PIXELS = 200_000_000  # ~200 MP hard cap
++        except Exception:
++            pass
+     except Exception:
+         return None
+     try:

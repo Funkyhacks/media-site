@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Funkyhacks <funkyhacks@users.noreply.github.com>
+Date: Thu, 21 Aug 2026 00:00:00 +0000
+Subject: [PATCH 6/6] api/file_routes: RFC 6266 Content-Disposition (no header breakout)
+
+file_content() set Content-Disposition: inline; filename="<name>" where
+name is the attacker-controlled decrypted original name. A filename with an
+embedded quote breaks out of the value (header breakout / proxy-smuggling
+surface; Starlette/h11 block raw CRLF so it is not full injection). Emit a
+safe ASCII fallback plus a UTF-8 filename* per RFC 6266 section 4.
+
+Refs: docs/SECURITY.md finding (Content-Disposition), THREAT-MODEL.md T18.
+
+---
+--- a/app/api/file_routes.py
++++ b/app/api/file_routes.py
+@@ -44,6 +44,31 @@
+     return guessed or fallback
+ 
+ 
++# EXACT target text for the 0006 patch (self-contained function, verified).
++# The generator reads this file and splices in the function below.
++
++def _content_disposition(filename: str) -> str:
++    """Build an RFC 6266 Content-Disposition value from an untrusted filename.
++
++    The decrypted original name is attacker-controlled (set at upload). The
++    old code interpolated it raw into ``filename="..."``, so a value like
++    ``x"; Set-Cookie: evil=1; filename="y`` breaks out of the quoted string
++    (SECURITY.md finding: Content-Disposition injection). Starlette/h11 reject
++    raw CRLF so it is not a full header-injection, but it is a malformed-header
++    / proxy-smuggling surface. Emit a safe ASCII fallback plus a UTF-8
++    ``filename*`` per RFC 6266 section 4.
++    """
++    import urllib.parse
++
++    unsafe = set('";\r\n\t') | set(chr(i) for i in range(0, 32))
++    safe = "".join(c if (c.isascii() and c not in unsafe) else "_" for c in filename).strip()
++    if not safe:
++        safe = "download"
++    encoded = urllib.parse.quote(filename, safe="")
++    return 'inline; filename="' + safe + '"; filename*=UTF-8\'\'' + encoded
++
++
++
+ def _ext_of(filename: str) -> str:
+     _, ext = os.path.splitext(filename)
+     return ext.lstrip(".").lower() or "bin"
+
+--- a/app/api/file_routes.py
++++ b/app/api/file_routes.py
+@@ -176,7 +176,7 @@
+         media_type=rec.content_type,
+         headers={
+             "Content-Length": str(rec.size),
+-            "Content-Disposition": f'inline; filename="{name}"',
++            "Content-Disposition": _content_disposition(name),
+             "Cache-Control": "no-store",
+         },
+     )
