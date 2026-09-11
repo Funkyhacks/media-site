@@ -1,4 +1,4 @@
-name: CI
+name: secweb-backend
 
 on:
   push:
