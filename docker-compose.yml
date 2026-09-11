@@ -1,0 +1,84 @@
+# SecWeb — docker-compose (SPEC.md §3, IMMUTABLE directive #5 honoured).
+# Services:
+#   api     FastAPI backend (uvicorn, 2 workers)
+#   db      SQLite on a named volume (the "db" service per spec)
+#   cache   Redis with appendonly no + save "" (ephemeral, no disk writes)
+#   web     React (Vite) static frontend (built multi-stage)
+
+name: secweb
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    image: secweb/api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      SECWEB_JWT_SECRET: ${SECWEB_JWT_SECRET:?must set SECWEB_JWT_SECRET}
+      SECWEB_JWT_TTL_SECONDS: ${SECWEB_JWT_TTL_SECONDS:-3600}
+      SECWEB_STORAGE_DIR: /app/storage
+      SECWEB_DB_PATH: /app/db/secweb.db
+      SECWEB_REDIS_URL: redis://cache:6379/0
+      SECWEB_DEFAULT_TTL_SECONDS: ${SECWEB_DEFAULT_TTL_SECONDS:-300}
+    volumes:
+      - dbdata:/app/db
+      - storage:/app/storage
+    depends_on:
+      - cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "2.0"
+
+  db:
+    image: alpine:3.20
+    command: sh -c 'touch /app/db/secweb.db && sleep infinity'
+    volumes:
+      - dbdata:/app/db
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    # IMMUTABLE directive #5: ephemeral, no disk persistence.
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "1.0"
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    image: secweb/web:latest
+    ports:
+      - "4173:4173"
+    environment:
+      STATIC_ROOT: /app/dist
+      PORT: 4173
+    restart: unless-stopped
+    depends_on:
+      - api
+
+volumes:
+  dbdata:
+  storage:
