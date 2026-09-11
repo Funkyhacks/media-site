@@ -1,37 +1,24 @@
-# OS
-.DS_Store
-Thumbs.db
-
-# Dependencies
+# dependencies
 node_modules/
-.venv/
-venv/
-__pycache__/
-*.pyc
 
-# Builds / artifacts
+# build output
 dist/
 build/
-out/
-.next/
-.cache/
+*.tsbuildinfo
 
-# Environment & secrets
+# logs & caches
+*.log
+.vite/
+.cache/
+coverage/
+
+# env
 .env
 .env.*
 !.env.example
 
-# Logs
-*.log
-logs/
-
-# Editors / IDE
+# editor
 .vscode/
 .idea/
 *.swp
-
-# Local data
-*.sqlite
-*.db
-*.db-wal
-*.db-shm
+.DS_Store
