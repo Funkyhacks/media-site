@@ -68,7 +68,7 @@ services:
       && sleep infinity"
     volumes:
       - dbdata:/app/db
-  networks:
+    networks:
       - app-network
     restart: unless-stopped
     # Healthy == the DB file exists AND is owned by UID 1000 (the API's user).
