@@ -26,7 +26,12 @@ services:
       - dbdata:/app/db
       - storage:/app/storage
     depends_on:
-      - cache
+      # Start only AFTER the db service reports healthy (volume seeded + owned
+      # by UID 1000), so the API's first write never hits a root-owned file.
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)"]
@@ -42,10 +47,31 @@ services:
 
   db:
     image: alpine:3.20
-    command: sh -c 'touch /app/db/secweb.db && sleep infinity'
+    # The API runs as the non-root `secweb` user (UID 1000 in python:3.12-slim,
+    # see docker/Dockerfile.backend). This service seeds and OWNS the `dbdata`
+    # volume as that same UID so the API can write secweb.db and its SQLite
+    # journal/WAL sidecars. If this runs as root (alpine default), the DB file
+    # is root-owned 0644 and the API's first write fails with
+    # "attempt to write a readonly database".
+    command: >-
+      sh -c "mkdir -p /app/db
+      && chown -R 1000:1000 /app/db
+      && touch /app/db/secweb.db
+      && chown 1000:1000 /app/db/secweb.db
+      && chmod 0664 /app/db/secweb.db
+      && sleep infinity"
     volumes:
       - dbdata:/app/db
     restart: unless-stopped
+    # Healthy == the DB file exists AND is owned by UID 1000 (the API's user).
+    # The api service depends on this, so it never starts against a root-owned
+    # volume. (alpine's busybox stat has no --printf; parse human output.)
+    healthcheck:
+      test: ["CMD", "sh", "-c", "[ -f /app/db/secweb.db ] && stat -c '%u' /app/db/secweb.db 2>/dev/null | grep -qx 1000"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
 
   cache:
     image: redis:7-alpine
