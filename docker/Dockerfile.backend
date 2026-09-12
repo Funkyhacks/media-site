@@ -21,8 +21,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # --- runtime stage ---
 FROM base AS runtime
-# non-root user (defense in depth; the image never needs root)
-RUN groupadd --system secweb && useradd --system --gid secweb --home-dir /app secweb
+# non-root user (defense in depth; the image never needs root).
+#
+# UID/GID 1000 is a LOAD-BEARING CONTRACT, not a cosmetic choice:
+#   * docker-compose.yml runs the `db` service (alpine) as a separate container
+#     that seeds + chowns the shared `dbdata` volume to UID 1000, and gates the
+#     api's startup on that ownership (see its healthcheck).
+#   * If `useradd --system` assigned a *different* UID here, the api (running as
+#     `secweb`) would fail to write secweb.db -> "attempt to write a readonly
+#     database" (root-owned file on the volume).
+# Keep this 1000 in lockstep with the `chown 1000:1000` in docker-compose.yml.
+ARG SECWEB_UID=1000
+ARG SECWEB_GID=1000
+RUN groupadd --gid "$SECWEB_GID" secweb \
+    && useradd --uid "$SECWEB_UID" --gid secweb --home-dir /app \
+               --shell /usr/sbin/nologin secweb
 
 COPY --from=deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=deps /usr/local/bin /usr/local/bin
