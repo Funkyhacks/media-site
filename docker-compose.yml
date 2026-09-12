@@ -5,6 +5,10 @@
 #   cache   Redis with appendonly no + save "" (ephemeral, no disk writes)
 #   web     React (Vite) static frontend (built multi-stage)
 
+networks:
+  app-network:
+    driver: bridge
+
 name: secweb
 
 services:
@@ -25,6 +29,8 @@ services:
     volumes:
       - dbdata:/app/db
       - storage:/app/storage
+    networks:
+      - app-network
     depends_on:
       # Start only AFTER the db service reports healthy (volume seeded + owned
       # by UID 1000), so the API's first write never hits a root-owned file.
@@ -62,6 +68,8 @@ services:
       && sleep infinity"
     volumes:
       - dbdata:/app/db
+  networks:
+      - app-network
     restart: unless-stopped
     # Healthy == the DB file exists AND is owned by UID 1000 (the API's user).
     # The api service depends on this, so it never starts against a root-owned
@@ -85,6 +93,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    networks:
+      - app-network
     deploy:
       resources:
         limits:
@@ -104,7 +114,9 @@ services:
     restart: unless-stopped
     depends_on:
       - api
-
+    networks:
+      - app-network
+      
 volumes:
   dbdata:
   storage:
